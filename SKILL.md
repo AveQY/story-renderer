@@ -1,6 +1,6 @@
 ---
 name: story-renderer
-description: 将故事脚本转换为分镜图片或视频。支持自动分镜和手动分镜两种模式，用户可配置生成模型（API 或本地），输出高质量的视觉化内容。
+description: 将故事脚本转换为分镜图片或视频。支持自动分镜和手动分镜，用户可配置生成模型（API/本地/skill），支持参考图（img2img）、角色一致性、断点续传、成本估算、后置验证和可配置宽高比。
 argument-hint: <command> [options]
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, Skill
 ---
@@ -31,6 +31,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, Skill
 | `config` | 查看或修改配置 | `查看配置` / `修改配置` |
 | `list` | 列出所有项目 | `列出项目` |
 | `regenerate` | 重新生成某一镜 | `重新生成 project-xxx scene_05` |
+| `export` | 导出分镜为图片集/ZIP | `导出 3f546fcfe019 --format zip` |
+| `delete` | 删除项目 | `删除项目 3f546fcfe019` |
+| `batch` | 批量操作（重生成/改风格） | `批量重生成 3f546fcfe019 --scenes 1-5` |
 
 **命令行参数（覆盖用户偏好）：**
 
@@ -74,7 +77,11 @@ Options:
         │
         ├── source/              # 源文件
         │   ├── script.md
-        │   └── reference/       # 参考图
+        │   ├── storyboard.md    # 分镜文件（可选）
+        │   └── reference/       # 参考图（用于风格参考或 img2img）
+        │       ├── character/   # 角色参考图
+        │       ├── scene/       # 场景参考图
+        │       └── style/       # 风格参考图
         │
         ├── generated/           # AI 生成内容
         │   ├── images/
@@ -90,6 +97,72 @@ Options:
             ├── subtitles.srt
             └── thumbnail.png
 ```
+
+## 脚本格式
+
+支持两种脚本格式，无需额外工具即可直接编写。
+
+### 格式一：纯文本（自动分镜）
+
+直接写故事文本，系统根据段落、标点、语义自动切分为镜头：
+
+```markdown
+全校觉醒日，所有人都在等自己的能力降临。
+
+觉醒广场上，巨大的测试石散发着幽蓝的光芒。
+
+主角站在人群最后，低头看着自己的手。
+
+只有他，还没有觉醒任何能力。
+
+突然，测试石爆发出前所未有的金色光芒。
+```
+
+### 格式二：手动分镜标记
+
+使用 `## 镜头 N` 标题标记每个镜头，更精确控制：
+
+```markdown
+## 镜头 1
+**时长**：5秒
+**画面**：觉醒广场全景，全校学生围在巨大的测试石前，石头发散幽蓝光芒
+**旁白**：全校觉醒日，所有人都在等自己的能力降临。
+**镜头**：缓慢推近到主角
+
+## 镜头 2
+**时长**：8秒
+**画面**：主角站在人群最后，低头看着自己的手，周围同学的彩色光芒映在他脸上
+**旁白**：只有他，还没有觉醒任何能力。
+**镜头**：侧面跟拍
+
+## 镜头 3
+**时长**：6秒
+**画面**：突然，测试石爆发出前所未有的金色光芒，所有人转头看向主角
+**旁白**：直到那一天，命运终于对他开口。
+**镜头**：环绕主角旋转
+```
+
+**标记说明：**
+- `**时长**`：镜头时长（秒），可选，默认 5 秒
+- `**画面**`：画面描述（用于生成提示词）
+- `**旁白**`：旁白文本（用于 TTS 配音）
+- `**镜头**`：运镜描述（推近、环绕、平移等）
+- `**参考图**`：指定参考图路径（用于 img2img 或风格参考）
+
+### 格式三：Storyboard 文件
+
+支持独立的 `.storyboard.md` 文件，包含完整分镜表：
+
+```markdown
+# 分镜脚本：xxx
+
+| 镜号 | 时长 | 画面描述 | 旁白 | 运镜 | 参考图 |
+|------|------|---------|------|------|--------|
+| 1 | 5s | 觉醒广场全景... | 全校觉醒日... | 推近 | — |
+| 2 | 8s | 主角站在人群后... | 只有他... | 侧拍 | reference/pose.jpg |
+```
+
+系统自动按优先级检测：手动分镜标记 > Storyboard 文件 > 纯文本自动分镜。
 
 ---
 
@@ -280,7 +353,7 @@ if not preferences["rendering"]["save_all_versions"]:
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "root_path": "C:/Users/xxx/story-renderer-projects",
   "model_config": {
     "type": "api|local|skill",
@@ -300,6 +373,19 @@ if not preferences["rendering"]["save_all_versions"]:
     "auto_split": true,
     "max_scenes": 30,
     "min_scene_duration": 3
+  },
+  "aspect_ratio": {
+    "ratio": "9:16",
+    "options": ["16:9", "9:16", "1:1"],
+    "width": 1024,
+    "height": 1792
+  },
+  "consistency": {
+    "enable_fixed_seed": true,
+    "base_seed": 42,
+    "character_fingerprint": "main_character: teen_male, black_hair, school_uniform, golden_aura",
+    "negative_prompt": "blurry, low quality, distorted, extra limbs, watermark, text, ugly",
+    "style_prompt_prefix": "consistent art style, same character throughout, professional illustration"
   },
   "video_config": {
     "fps": 30,
@@ -337,6 +423,18 @@ if not preferences["rendering"]["save_all_versions"]:
 - `test_passed`: 模型是否通过测试（必须为 true 才能正常使用）
 - `test_skipped`: 用户是否跳过了测试（true 时每次渲染会警告）
 - `tested_at`: 测试通过的时间戳
+
+**aspect_ratio（宽高比）：**
+- `ratio`: 宽高比（"16:9" / "9:16" / "1:1"）
+- `options`: 可选宽高比列表
+- `width` / `height`: 生成图片的像素尺寸
+
+**consistency（一致性策略）：**
+- `enable_fixed_seed`: 是否使用固定 seed 保证画面一致性
+- `base_seed`: 基础 seed 值，每个镜头的 seed = base_seed + scene_index
+- `character_fingerprint`: 角色特征标签，附加到每个镜头的提示词中
+- `negative_prompt`: 负面提示词，所有镜头通用
+- `style_prompt_prefix`: 风格前缀，附加到每个镜头的提示词中
 
 **user_preferences 说明：**
 
@@ -550,8 +648,50 @@ if not preferences["rendering"]["save_all_versions"]:
    - `--no-confirm`: 跳过所有确认
    - `--verbose`: 显示详细日志
    
-5. 创建目录结构
-6. 写入 `config.json`（仅当测试通过）
+5. **依赖检查**
+   
+   检查系统依赖是否可用：
+
+   | 依赖 | 检查方式 | 失败处理 |
+   |------|---------|---------|
+   | ffmpeg | `ffmpeg -version` | 提示安装，视频模式跳过并警告 |
+   | Python | `python --version` | 初始化失败 |
+   | ComfyUI（本地模式） | `curl http://localhost:8188/system_stats` | 提示启动服务 |
+   
+   ```
+   ✅ ffmpeg 已安装 (version 6.1)
+   ✅ Python 3.11.5
+   ⚠️ ComfyUI 未检测到（本地模式需要手动启动）
+   ```
+
+6. **成本估算**
+   
+   根据场景数和模型类型估算总费用：
+
+   | 模型 | 每张图片成本（估算） |
+   |------|-------------------|
+   | DALL-E 3 HD | $0.08 |
+   | DALL-E 3 Standard | $0.04 |
+   | Midjourney | $0.05 |
+   | Stable Diffusion API | $0.02 |
+   | 本地模型（ComfyUI） | $0.00 |
+   
+   ```
+   💰 成本估算
+   场景数：17
+   模型：DALL-E 3 HD ($0.08/张)
+   预计图片费用：$1.36
+   预计视频费用（TTS + 渲染）：约 $0.50
+   ════════════════════
+   总计：约 $1.86
+   
+   💡 提示：视频模式下每张图片会生成 1-2 个版本用于选择
+   ```
+
+   如果 `save_all_versions: true`，成本乘以 1.5-2 倍并提示。
+
+7. 创建目录结构
+8. 写入 `config.json`（仅当测试通过）
 
 ### Phase 2: Render（渲染）
 
@@ -561,33 +701,123 @@ if not preferences["rendering"]["save_all_versions"]:
 
 1. **读取配置**
    - 从 `config.json` 读取模型配置
+   - 从 `config.json` 读取宽高比、一致性策略配置
 
-2. **读取脚本**
-   - 检测脚本格式
+2. **依赖检查**
+   - 渲染前检查依赖：
+     - 视频模式：检查 ffmpeg 是否可用
+     - TTS 模式：检查 TTS provider 是否可连接
+   - 如果依赖缺失，提示用户安装或降级为图片模式
+
+3. **读取脚本**
+   - 检测脚本格式（手动标记 > Storyboard > 纯文本）
    - 提取内容
+   - 加载 `source/reference/` 目录下的参考图（角色、场景、风格）
 
-3. **分镜设计**
+4. **分镜设计**
    - 自动模式：AI 分析脚本，切分镜头
-   - 手动模式：解析现有分镜标记
+   - 手动模式：解析现有分镜标记或 Storyboard 文件
    - 生成 `storyboard.json`
 
-4. **询问生成类型**
-   - 仅图片 / 图片+视频
+5. **断点续传检查**
+   - 检查 `generated/images/` 目录
+   - 统计已完成的镜头数
+   - 如果有部分镜头已生成：
+     ```
+     ⏸️  检测到已有 5/17 个镜头已完成
+     [R] 重新生成全部 / [C] 继续未完成的 / [S] 只重新生成指定镜头
+     > C
+     ```
+   - 继续模式：跳过已完成的镜头，从断点继续
+   - 应用 `save_all_versions` 策略（保留所有版本或仅保留 selected）
 
-5. **生成提示词**
+6. **成本确认**（如果偏好设置开启）
+   - 显示估算成本
+   - 确认是否继续
+
+7. **生成提示词**
    - 为每一镜生成 AI 图片提示词
-   - 支持风格一致性（角色、场景、色调）
+   - 应用一致性策略、参考图、宽高比
 
-6. **批量生成**
+8. **提示词预览与编辑**（`--no-confirm` 跳过）
+   - 展示每个镜头的完整提示词供用户审核：
+     ```
+     📝 提示词预览（17 个镜头）
+
+     ── 镜头 01 (seed: 42) ──
+     正向：consistent art style, same character throughout, professional illustration, teen male black hair school uniform golden aura, 觉醒广场全景，全校学生围在巨大的测试石前，石头发散幽蓝光芒
+     负向：blurry, low quality, distorted, extra limbs, watermark, text, ugly
+     参考图：reference/character/protagonist_front.jpg
+     尺寸：1024x1792
+
+     ── 镜头 02 (seed: 43) ──
+     正向：consistent art style, same character throughout, professional illustration, teen male black hair school uniform golden aura, 主角站在人群最后，低头看着自己的手
+     负向：blurry, low quality, distorted, extra limbs, watermark, text, ugly
+     参考图：—
+     尺寸：1024x1792
+
+     [E] 编辑提示词 / [A] 全部确认 / [S] 跳过特定镜头 / [Q] 退出
+     > E
+     输入镜头编号（如 02）：02
+     输入新提示词：> 主角站在人群最后，低头看着自己的手，周围的彩色光芒映在他脸上
+     ✅ 镜头 02 提示词已更新
+     ```
+   - 允许的操作：
+     - `[E]` 编辑指定镜头的正向/负向提示词
+     - `[A]` 确认全部提示词，开始生成
+     - `[S]` 跳过某些镜头（标记为 skipped）
+     - `[Q]` 退出渲染流程
+   - 如果 `interaction.confirm_before_generation` 为 false，跳过此步直接开始生成
+
+8. **批量生成**
    - 调用配置的模型 API
    - 保存到 `generated/images/scene_XX/v1.png`
    - 记录日志
+   - 应用重试策略
+   - 每个镜头生成后检查是否成功
+   - **取消生成**：生成过程中支持中断
+     ```
+     [Ctrl+C] 或输入 "cancel"
+     ⏸️  生成已中断（已完成 8/17 镜头）
+     [C] 继续 / [R] 放弃进度重新生成 / [Q] 退出
+     > C
+     ```
+   - 中断后记录进度到 `generation.log`，下次渲染自动断点续传
 
-7. **视频剪辑**（如果选择视频模式）
-   - 生成配音（TTS）
-   - 用 ffmpeg 剪辑
-   - 添加字幕
-   - 输出最终视频
+9. **后置验证**
+   - 对生成的图片进行验证：
+     ```
+     🔍 后置验证...
+     scene_01: ✅ 有效 (1024x1792, 1.2MB)
+     scene_02: ⚠️ 尺寸异常 (800x600，期望 1024x1792)
+     scene_03: ✅ 有效 (1024x1792, 1.5MB)
+     ```
+   - 验证项：
+     - 文件大小 > 0（非空文件）
+     - 图片尺寸与 `aspect_ratio` 配置匹配（容差 10%）
+     - 图片格式正确（PNG/JPG）
+   - 验证失败的处理：
+     - 自动重新生成（最多 2 次）
+     - 仍失败则标记为 failed，记录到 `failed_scenes`
+     - 提示用户手动处理
+
+10. **视频剪辑**（如果选择视频模式）
+    - 生成配音（TTS）
+    - 用 ffmpeg 剪辑
+    - 添加字幕
+    - 应用宽高比设置输出尺寸
+    - 输出最终视频到 `output/final_video.mp4`
+
+11. **完成报告**
+    ```
+    ✅ 渲染完成！
+    总镜头：17
+    成功：16
+    失败：1 (scene_05 — 可手动重新生成)
+    总耗时：约 8 分钟
+    实际费用：约 $1.82
+    输出：output/final_video.mp4
+    ```
 
 ### Phase 3: Regenerate（重新生成）
 
@@ -633,7 +863,42 @@ curl -X POST http://localhost:8188/prompt \
   -d '{"prompt": {...}}'
 ```
 
-### 3. 使用现有 Skill
+### 3. 参考图支持（img2img / 风格参考）
+
+#### 角色参考图
+
+放置在 `source/reference/character/` 目录下，在脚本中通过 `**参考图**` 标记引用：
+
+```markdown
+## 镜头 1
+**画面**：主角站在广场中央
+**参考图**：reference/character/protagonist_front.jpg
+```
+
+系统行为：
+- 自动读取参考图，提取视觉特征
+- 将角色描述附加到提示词中（如 "a teen male with black hair, school uniform..."）
+- 如果模型支持 img2img，使用参考图作为初始图
+
+#### 场景参考图
+
+放置在 `source/reference/scene/` 目录下，用于保持场景风格一致。
+
+#### 风格参考图
+
+放置在 `source/reference/style/` 目录下，用于设定整体画风（如水墨风、赛博朋克风）。
+
+#### img2img 参数映射
+
+| 模型 | 参考图参数 |
+|------|-----------|
+| DALL-E 3 | 不支持 img2img，使用描述引用 |
+| Stable Diffusion API | `init_image` (base64), `strength: 0.7` |
+| ComfyUI | 通过 API workflow 传入 LoadImage 节点 |
+| Midjourney | 不支持本地 img2img，使用 URL 引用 |
+| aweqy | 通过 skill 参数传入参考图 |
+
+### 4. 使用现有 Skill
 
 如果用户选择 `aweqy-image-generator`：
 ```
@@ -645,10 +910,73 @@ curl -X POST http://localhost:8188/prompt \
 ## 扩展点
 
 ### 1. 模板库
-用户可以保存常用的提示词模板：
-- 角色预设（主角外貌、服装）
-- 场景风格（赛博朋克、水墨画、动漫风）
-- 镜头语言（特写、全景、运镜）
+
+用户可以在 `.story-renderer/templates/` 下保存和复用提示词模板。系统自动将模板合并到每个镜头的提示词中。
+
+#### 模板文件格式
+
+```json
+// templates/character_preset.json
+{
+  "name": "主角预设",
+  "description": "主角外貌和服装模板",
+  "fields": {
+    "character_fingerprint": "teen male, black hair, school uniform, golden aura",
+    "style_prompt_prefix": "consistent anime style, detailed illustration"
+  }
+}
+```
+
+```json
+// templates/scene_style.json
+{
+  "name": "赛博朋克场景",
+  "description": "赛博朋克风格场景模板",
+  "fields": {
+    "style_prompt_prefix": "cyberpunk style, neon lights, rain, futuristic city",
+    "negative_prompt": "daylight, sunny, nature, low quality"
+  }
+}
+```
+
+```json
+// templates/shot_language.json
+{
+  "name": "运镜语言",
+  "description": "镜头运镜模板映射",
+  "mappings": {
+    "推近": "camera slowly pushes in, close-up detail",
+    "环绕": "camera orbits around subject, dynamic angle",
+    "平移": "camera pans across the scene, wide establishing shot",
+    "拉远": "camera pulls back to reveal full scene",
+    "俯拍": "top-down angle, looking down from above",
+    "仰拍": "low angle shot, looking up at subject"
+  }
+}
+```
+
+#### 模板使用
+
+```
+[模板管理]
+1. 查看可用模板
+2. 创建新模板
+3. 应用模板到项目
+4. 删除模板
+```
+
+应用模板时，模板字段与项目配置合并（项目配置优先）：
+
+```
+最终提示词 = style_prompt_prefix + scene_prompt + character_fingerprint + negative_prompt
+```
+
+#### 场景风格自动匹配
+
+如果多个镜头使用不同风格，系统根据镜头描述自动匹配：
+- "学校" → 校园场景模板
+- "战斗" → 动作场景模板
+- "对话" → 人物特写模板
 
 ### 2. 插件系统
 后续支持自定义插件：
@@ -685,6 +1013,67 @@ story-renderer 状态
 列出项目
 ```
 
+扫描 `<根路径>/projects/` 目录，显示每个项目的基本信息：
+
+```
+📁 项目列表（共 3 个）
+
+1. 全校最废的能力 (3f546fcfe019)
+   状态：✅ 已完成 | 场景：17/17 | 类型：图片+视频
+   创建：2026-06-21 | 更新：2026-06-22
+
+2. 赛博朋克 2077 番外篇 (a1b2c3d4e5f6)
+   状态：⏳ 进行中 | 场景：8/12 | 类型：图片
+   创建：2026-06-20 | 更新：2026-06-23
+
+3. 水墨江湖 (f7e8d9c0b1a2)
+   状态：❌ 失败 | 场景：5/10 | 类型：图片
+   创建：2026-06-19 | 更新：2026-06-19
+```
+
+每个项目卡片点击可进入详情视图。
+
+### 查看项目状态
+```
+story-renderer 状态
+```
+或指定项目：
+```
+story-renderer 状态 3f546fcfe019
+```
+
+显示项目详细信息：
+
+```
+📊 项目状态：全校最废的能力
+
+基本信息：
+  项目 ID：3f546fcfe019
+  脚本：source/script.md
+  分镜模式：手动 | 生成类型：图片+视频
+  宽高比：9:16
+
+进度：
+  ✅ 已完成：17/17 镜头
+  ❌ 失败：0
+  ⏳ 进行中：0
+  总进度：100%
+
+质量报告：
+  验证通过：16 | 尺寸异常：1 (scene_05)
+
+输出文件：
+  视频：output/final_video.mp4 (45.2MB)
+  字幕：output/subtitles.srt
+
+历史记录：
+  [06-22 14:30] 完成 scene_17
+  [06-22 14:28] 完成 scene_16
+  [06-22 14:25] 完成 scene_15
+```
+
+如果项目未完成，显示剩余工作量和预计时间。
+
 ### 重新生成某一镜
 ```
 重新生成 3f546fcfe019 scene_05
@@ -702,14 +1091,16 @@ story-renderer 状态
 当前配置：
 1. 根路径：C:\Users\xxx\story-projects
 2. 生成模型：OpenAI DALL-E 3
-3. 用户偏好：
+3. 宽高比：9:16（1024x1792）
+4. 风格一致性：固定 seed + 角色指纹
+5. 用户偏好：
    - 默认生成类型：仅图片
    - 自动重试：是（最多 3 次）
    - 显示进度条：是
    - 详细日志：否
 
 选择要修改的项：
-[1-3] 修改具体配置 / [P] 修改偏好 / [Q] 退出
+[1-5] 修改具体配置 / [P] 修改偏好 / [Q] 退出
 > P
 
 📋 用户偏好设置
@@ -730,7 +1121,9 @@ story-renderer 状态
 [2] 分镜偏好
 [3] 渲染偏好
 [4] 交互偏好
-[5] 恢复默认设置
+[5] 宽高比设置
+[6] 一致性策略
+[7] 恢复默认设置
 [Q] 返回
 > 1
 
@@ -745,6 +1138,166 @@ story-renderer 状态
 
 ✅ 偏好已更新！
 ```
+
+---
+
+**宽高比设置：**
+
+```
+当前宽高比：9:16 (1024x1792)
+
+可用选项：
+[1] 16:9 — 横屏视频 / YouTube (1024x576)
+[2] 9:16 — 竖屏短视频 / 抖音 (1024x1792) [当前]
+[3] 1:1 — 方形封面 / Instagram (1024x1024)
+
+选择宽高比 [1-3] 或 [Q] 返回：
+> 1
+
+✅ 宽高比已更新为 16:9 (1024x576)
+注意：已有项目的图片尺寸不变，新生成的项目使用新尺寸
+```
+
+**一致性策略：**
+
+```
+当前一致性策略：
+  固定 seed：是（base_seed = 42）
+  角色指纹：teen male, black hair, school uniform, golden_aura
+  负面提示词：blurry, low quality, distorted, extra limbs, watermark, text, ugly
+  风格前缀：consistent art style, same character throughout, professional illustration
+
+1. 切换固定 seed [Y/N]
+2. 修改角色指纹
+3. 修改负面提示词
+4. 修改风格前缀
+5. 重置为默认值
+[Q] 返回
+> 2
+
+当前角色指纹：
+  teen male, black hair, school uniform, golden_aura
+
+输入新角色指纹（留空保持不变）：
+> teen male, silver hair, black trench coat, lightning aura
+
+✅ 角色指纹已更新
+```
+
+---
+
+### 导出项目
+
+```
+导出 3f546fcfe019
+导出 3f546fcfe019 --format zip
+导出 3f546fcfe019 --format images
+导出 3f546fcfe019 --format storyboard
+```
+
+**格式选项：**
+
+| 格式 | 说明 | 输出 |
+|------|------|------|
+| `zip` | 所有分镜图打包 | `<项目名>_export.zip` |
+| `images` | 分镜图片集（含 selected 版本） | 文件夹 |
+| `storyboard` | 分镜表为 JSON / CSV | `<项目名>_storyboard.json` |
+| `video` | 已渲染的视频文件 | `final_video.mp4` |
+
+```
+📦 导出项目：全校最废的能力
+
+选择导出格式：
+[1] ZIP 打包（所有分镜图 + 元数据）
+[2] 图片集（仅图片）
+[3] 分镜表（JSON / CSV）
+[4] 视频文件（final_video.mp4）
+
+> 1
+
+正在打包...
+✅ 导出完成：C:\Users\xxx\story-projects\exports\全校最废的能力_export.zip (23.4MB)
+```
+
+导出时自动排除临时文件（v1/v2/v3 未选中的版本）和敏感信息（API Key）。
+
+### 删除项目
+
+```
+删除项目 3f546fcfe019
+```
+
+```
+🗑️  确认删除项目：全校最废的能力
+
+项目信息：
+  场景数：17 | 生成类型：图片+视频
+  创建时间：2026-06-21
+
+此操作不可恢复，确认删除？[Y/n]
+> Y
+
+✅ 项目已删除
+```
+
+删除前检查：
+- 项目状态为 completed 或 failed（不删除进行中的项目）
+- 确认用户意图（防止误删）
+
+### 批量操作
+
+```
+批量重生成 3f546fcfe019
+批量重生成 3f546fcfe019 --scenes 1-5,8
+批量改风格 3f546fcfe019 --style "cyberpunk, neon lights"
+批量导出 3f546fcfe019
+```
+
+**批量重新生成：**
+
+```
+🔧 批量重新生成
+项目：全校最废的能力
+
+选择范围：
+[1] 全部镜头（17 个）
+[2] 指定镜头（如 1-5,8）
+[3] 失败的镜头（scene_05）
+[4] 评分最低的镜头（基于后置验证）
+
+> 3
+
+将重新生成以下镜头：scene_05
+预计费用：$0.08
+确认？[Y/n]
+> Y
+
+⏳ 重新生成 scene_05...
+✅ scene_05 完成
+```
+
+**批量改风格：**
+
+```
+🎨 批量改风格
+项目：全校最废的能力
+
+当前风格前缀：
+  consistent art style, same character throughout, professional illustration
+
+输入新风格前缀：
+> watercolor painting style, soft brush strokes, pastel colors, dreamy atmosphere
+
+将更新以下镜头：
+  scene_01 ~ scene_17（17 个镜头）
+
+确认？[Y/n]
+> Y
+
+⏳ 重新生成 17 个镜头...
+```
+
+批量操作中支持 `--dry-run` 预览变更，不实际执行。
 
 ---
 
@@ -778,10 +1331,41 @@ story-renderer 状态
 
 ---
 
+## 版本升级
+
+### v1.0.0 → v2.0.0
+
+当检测到 config.json 中 `version` 为 "1.0.0" 时，执行迁移：
+
+1. **新增字段**：
+   - `config.aspect_ratio`：默认 `{"ratio": "9:16", "options": ["16:9", "9:16", "1:1"], "width": 1024, "height": 1792}`
+   - `config.consistency`：默认 `{"enable_fixed_seed": true, "base_seed": 42, "character_fingerprint": "", "negative_prompt": "blurry, low quality, distorted, extra limbs, watermark, text, ugly", "style_prompt_prefix": "consistent art style"}`
+   - `user_preferences.storyboard.prefer_auto_split`：默认 `true`
+   - `user_preferences.rendering.prompt_language`：默认 `"zh-CN"`
+
+2. **目录扩展**：创建 `source/reference/character/`、`source/reference/scene/`、`source/reference/style/`
+
+3. **更新 `project.json` 结构**：增加 `aspect_ratio` 和 `consistency` 字段
+
+4. **迁移日志**：记录到 `.story-renderer/migration.log`
+
+```
+[2026-06-23] Migrating config v1.0.0 → v2.0.0
+[2026-06-23] Added aspect_ratio config
+[2026-06-23] Added consistency config
+[2026-06-23] Created reference directories
+[2026-06-23] Migration complete ✅
+```
+
 ## Future Enhancements
 
-1. **角色一致性**：使用 ControlNet / IP-Adapter 保持角色外貌一致
+1. **角色一致性增强**：ControlNet / IP-Adapter 保持角色外貌一致
 2. **视频特效**：转场、滤镜、字幕动画
 3. **多语言配音**：支持多种 TTS 引擎
 4. **协作功能**：多人同时编辑分镜
 5. **Web UI**：提供可视化界面预览和编辑
+6. **API Key 加密存储**：使用系统密钥链存储敏感信息
+7. **批量导出**：导出分镜为 PDF / PPT / 视频剪辑工程文件
+8. **智能参考图匹配**：自动从已有镜头中提取最佳参考图
+9. **提示词自动优化**：根据历史生成结果优化提示词模板
+10. **版本对比**：并排对比同一镜头的不同版本
