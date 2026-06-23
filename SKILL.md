@@ -178,15 +178,24 @@ Options:
 
 会询问：
 1. **根路径**：所有项目和配置保存的位置
-2. **生成模型类型**：
+2. **稿子源**：
+   - [1] 本地文件（从用户电脑选择 markdown 脚本文件）
+   - [2] 在线接口（从远程 API 获取脚本内容）
+3. **生成模型类型**：
    - API 模型（OpenAI DALL-E / Midjourney / Stable Diffusion API）
    - 本地模型（ComfyUI / Automatic1111）
    - 使用现有 skill（如 aweqy-image-generator）
-3. **API 配置**（如果选择 API）：
+4. **在线接口配置**（如果稿子源选择在线接口）：
+   - 接口地址（如 `https://example.com/api/script`）
+   - API Key
+   - 请求方法（GET/POST）
+   - 脚本内容在响应中的路径（如 `data.content`）
+   - 测试接口连通性
+5. **API 配置**（如果生成模型选择 API）：
    - API Key
    - Base URL
    - 默认参数
-4. **模型测试**（关键步骤）：
+6. **模型测试**（关键步骤）：
    - 使用用户提供的配置发起测试请求
    - 生成一张简单的测试图片（如 "a red apple on a white table"）
    - 验证 API 响应状态和返回内容
@@ -203,6 +212,12 @@ Options:
 **交互流程：**
 
 #### Step 1: 读取脚本
+- **如果稿子源为在线接口**：
+  - 读取 `config.json` 中的 `script_source` 配置
+  - 构造 HTTP 请求（GET/POST + api_key + params）
+  - 根据 `response_path` 从响应 JSON 中提取脚本内容
+  - 将内容写入临时文件，继续后续流程
+  - 详细模板参见 `references/script-source-template.md`
 - 自动检测脚本类型：
   - 纯文本脚本（自动分镜）
   - 带分镜标记的脚本（如 `## 镜头 1`）
@@ -355,6 +370,17 @@ if not preferences["rendering"]["save_all_versions"]:
 {
   "version": "2.0.0",
   "root_path": "C:/Users/xxx/story-renderer-projects",
+  "script_source": {
+    "mode": "local",
+    "api_url": "",
+    "api_key": "",
+    "method": "GET",
+    "params": {},
+    "headers": {},
+    "response_path": "data.content",
+    "cache_enabled": true,
+    "cache_ttl": 3600
+  },
   "model_config": {
     "type": "api|local|skill",
     "provider": "openai|midjourney|sd|comfyui|aweqy",
@@ -423,6 +449,17 @@ if not preferences["rendering"]["save_all_versions"]:
 - `test_passed`: 模型是否通过测试（必须为 true 才能正常使用）
 - `test_skipped`: 用户是否跳过了测试（true 时每次渲染会警告）
 - `tested_at`: 测试通过的时间戳
+
+**script_source（稿子源）：**
+- `mode`: 稿子源模式（`"local"` / `"api"`）
+- `api_url`: 在线接口地址（mode 为 api 时必填）
+- `api_key`: 接口 API 密钥（mode 为 api 时必填）
+- `method`: HTTP 方法，默认 `"GET"`
+- `params`: URL 查询参数对象
+- `headers`: 自定义请求头对象
+- `response_path`: 响应 JSON 中提取脚本内容的路径，支持点号分隔，默认 `"data.content"`
+- `cache_enabled`: 是否缓存接口结果，默认 `true`
+- `cache_ttl`: 缓存有效期（秒），默认 `3600`
 
 **aspect_ratio（宽高比）：**
 - `ratio`: 宽高比（"16:9" / "9:16" / "1:1"）
@@ -1338,6 +1375,7 @@ story-renderer 状态 3f546fcfe019
 当检测到 config.json 中 `version` 为 "1.0.0" 时，执行迁移：
 
 1. **新增字段**：
+   - `config.script_source`：默认 `{"mode": "local", "api_url": "", "api_key": "", "method": "GET", "params": {}, "headers": {}, "response_path": "data.content", "cache_enabled": true, "cache_ttl": 3600}`
    - `config.aspect_ratio`：默认 `{"ratio": "9:16", "options": ["16:9", "9:16", "1:1"], "width": 1024, "height": 1792}`
    - `config.consistency`：默认 `{"enable_fixed_seed": true, "base_seed": 42, "character_fingerprint": "", "negative_prompt": "blurry, low quality, distorted, extra limbs, watermark, text, ugly", "style_prompt_prefix": "consistent art style"}`
    - `user_preferences.storyboard.prefer_auto_split`：默认 `true`
