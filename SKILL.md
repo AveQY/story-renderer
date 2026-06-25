@@ -1,6 +1,7 @@
 ---
 name: story-renderer
 description: 将故事脚本转换为分镜图片或视频。支持自动分镜和手动分镜，用户可配置生成模型（API/本地/skill），支持参考图（img2img）、角色一致性、断点续传、成本估算、后置验证和可配置宽高比。
+version: 1.0.0
 argument-hint: <command> [options]
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, Skill
 ---
@@ -8,6 +9,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, Skill
 # Story Renderer
 
 将文本故事脚本自动转换为分镜图片或完整视频。
+
+**输出风格：简洁直接，不要过度解释。**
 
 ---
 
@@ -942,6 +945,11 @@ curl -X POST http://localhost:8188/prompt \
 调用 /aweqy-image-generator <prompt>
 ```
 
+### 5. aweqy 直连（已验证）
+
+`image.aweqy.top` 已验证可用，可直接作为生成后端。配置与调用细节见 `references/image-aweqy-api.md`。
+关键点：生成慢（30s–120s+），需 120–300s timeout；可能先 524 再成功；额度制，用尽回 429。
+
 ---
 
 ## 扩展点
@@ -1395,7 +1403,15 @@ story-renderer 状态 3f546fcfe019
 [2026-06-23] Migration complete ✅
 ```
 
-## Future Enhancements
+## 接口一致性
+
+`story-renderer` 的在线稿子源接口（`script_source` 配置 + `references/script-source-template.md`）是 Hermes 生态中**在线接口的规范模板**。其他 skill（如 `comic-script-generator`）需要实现在线接口时，必须对齐本 skill 的接口设计原则：
+
+- 单一职责：一个请求 = 一次完整任务
+- 幂等性：相同参数返回相同结果
+- 版本化：通过 `version` 字段兼容格式
+- 状态追踪：通过 `job_id` 查询长时间任务
+- 错误标准化：统一 `error` 结构（code/message/details）
 
 1. **角色一致性增强**：ControlNet / IP-Adapter 保持角色外貌一致
 2. **视频特效**：转场、滤镜、字幕动画
